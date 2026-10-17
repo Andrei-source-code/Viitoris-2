@@ -5,22 +5,23 @@ import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+# Instanța Flask recunoscută automat de Vercel
 app = Flask(__name__)
-CORS(app)  # Permite apelurile Cross-Origin securizate din WordPress
+CORS(app)
 
-# 1. Configurare căi absolute
+# Căi absolute pentru fișiere pe Vercel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, 'baza_cariere.csv')
 JSON_PATH = os.path.join(BASE_DIR, 'surse_piata.json')
 
-# 2. Preluare securizată cheie API Google Gemini din Environment
+# Cheie API Google Gemini din Environment Variables
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 
 @app.route('/', methods=['GET'])
 @app.route('/ping', methods=['GET'])
 def health_check():
-    """Endpoint simplu pentru verificarea stării serverului pe Vercel."""
+    """Endpoint simplu pentru verificarea conexiunii."""
     return jsonify({
         'status': 'online',
         'message': 'Serverul Viitoris este activ pe Vercel!',
@@ -71,7 +72,7 @@ def cauta_competitori_osm(oras, tip_afacere):
 
 
 def genereaza_raport_gemini(prompt_text):
-    """Apelează Google Gemini API cu o limită extinsă de caractere pentru rapoarte ultradetaliate."""
+    """Apelează Google Gemini API pentru generare de raport avansat."""
     if not GEMINI_API_KEY:
         raise Exception("Cheia GEMINI_API_KEY nu este configurată în Environment Variables pe Vercel.")
 
@@ -86,7 +87,7 @@ def genereaza_raport_gemini(prompt_text):
         "contents": [{"parts": [{"text": prompt_text}]}],
         "generationConfig": {
             "temperature": 0.75,
-            "maxOutputTokens": 3500  # Permite redactarea unui raport lung și complex
+            "maxOutputTokens": 3500
         }
     }
 
@@ -185,3 +186,86 @@ def analizeaza_business_din_surse():
     tip_afacere_input = str(data.get('tip_afacere', 'cafenea')).strip()
 
     # 1. Căutare live competitori pe harta OpenStreetMap
+    nr_competitori = cauta_competitori_osm(oras_utilizator, tip_afacere_input)
+
+    # 2. Preluare date din surse_piata.json
+    domeniu_cheie = "cafenea"
+    tip_lower = tip_afacere_input.lower()
+    for k in surse_piata.keys():
+        if k in tip_lower or tip_lower in k:
+            domeniu_cheie = k
+            break
+
+    afacere_info = surse_piata.get(domeniu_cheie, surse_piata.get("cafenea", {}))
+    locatii_disponibile = afacere_info.get("locatii", {})
+    info_locatie = locatii_disponibile.get("1", list(locatii_disponibile.values())[0] if locatii_disponibile else {})
+
+    buget_minim = info_locatie.get("buget_minim_necesar", 10000)
+    sursa_nume = info_locatie.get("sursa_informatii", "Studiu de piață Horeca & Real Estate")
+    nume_afacere = afacere_info.get("nume", tip_afacere_input.capitalize())
+
+    reusita = buget_utilizator >= buget_minim
+    status_str = "REUȘITĂ" if reusita else "EȘEC"
+
+    prompt_ia = f"""
+Ești un Partener Senior într-o firmă de consultanță în strategie, analiză financiară și geomarketing din România.
+Generează un STUDIU DE FEZABILITATE ȘI ANALIZĂ DE PIAȚĂ EXTREM DE DETALIAT, COMPREHENSIV ȘI RIGUROS.
+
+DATE DE INTRARE COLECTATE LIVE:
+- Oraș vizat: {oras_utilizator}
+- Tip afacere: {nume_afacere} ({tip_afacere_input})
+- Buget de investiție alocat de antreprenor: {buget_utilizator} EUR
+- Buget minim recomandat pe piață (CAPEX + OPEX 3 luni): {buget_minim} EUR
+- Concurență directă identificată pe harta satelit OpenStreetMap în {oras_utilizator}: {nr_competitori} locații active.
+
+STRUCTURA OBLIGATORIE A RAPORTULUI:
+
+1. 📊 SINTEZĂ EXECUTIVĂ & DIAGNOSTIC FINANCIAR
+- Declară decizia finală: FEZABIL ({status_str}) la bugetul de {buget_utilizator} EUR în {oras_utilizator}.
+- Oferă un Scor de Fezabilitate General (de la 1 la 10) cu explicație analitică.
+- Comparație directă între suma disponibilă ({buget_utilizator} EUR) și bugetul minim de lansare ({buget_minim} EUR).
+
+2. 🗺️ ANALIZĂ GEOMARKETING & SATURAȚIA PIEȚEI LOCALE (DATA OPENSTREETMAP)
+- Interpretează impactul prezenței celor {nr_competitori} competitori existenți în {oras_utilizator}.
+- Clasifică piața din {oras_utilizator} (Sub-saturată / Echilibrată / Saturation) și specifică dificultatea de achiziție a primilor clienți.
+- Identifică tipul de amplasament ideal în {oras_utilizator}.
+
+3. 💰 STRUCTURA FINANCIARĂ DETALIATĂ (DEFALCARE CAPEX & OPEX)
+Simulează și defalchează bugetul de {buget_utilizator} EUR pe categorii clare de cheltuieli:
+  - Spațiu & Amenajare (Chirie 3 luni + garanție, renovare, design interior)
+  - Echipamente profesionale & Tehnologie (aparatură, POS, soft gestiune)
+  - Autorizații, Avize & Legal (DSP, DSV, Primărie, PFA/SRL)
+  - Stoc inițial de marfă & Consumabile
+  - Fond de Rulment & Buget de Rezervă (OPEX primele 3 luni)
+
+4. 📈 ECONOMIA UNITĂȚII (UNIT ECONOMICS) & BREAK-EVEN POINT
+- Estimează Bonul Mediu de Consum (în RON/EUR) specific pentru un {nume_afacere} în România.
+- Calculează numărul estimat de clienți/zi necesari pentru a atinge Punctul de Echilibru (Break-Even).
+- Estimează Perioada de Amortizare a Investiției (ROI - Payback Period în luni).
+
+5. 🚀 STRATEGIE DE PĂTRUNDERE PE PIAȚĂ & DIFERENȚIERE
+- Formularea unei Propuneri Unice de Valoare (PUV) specifice.
+- 3 Tactici agresive și pragmatice de marketing prin care afacerea va atrage clienți de la cei {nr_competitori} competitori din {oras_utilizator}.
+
+6. ⚠️ MATRICE DE RISCURI & FOAIE DE PARCURS (ROADMAP DE LANSARE)
+- Top 3 Riscuri Majore + Măsuri de atenuare.
+- Foaie de parcurs în 4 pași logici pentru lansare.
+"""
+
+    try:
+        raspuns_ia = genereaza_raport_gemini(prompt_ia)
+    except Exception as e:
+        raspuns_ia = f"Sistemul a estimat un rezultat de: {status_str}.\n\nBugetul minim recomandat pentru o afacere de tip {nume_afacere} în {oras_utilizator} este de {buget_minim} EUR.\nAu fost identificați {nr_competitori} competitori pe hartă.\n\n(Notă eroare raport AI: {str(e)})"
+
+    return jsonify({
+        'rezultat': status_str,
+        'explicatie': raspuns_ia,
+        'buget_minim': buget_minim,
+        'sursa_folosita': sursa_nume,
+        'oras': oras_utilizator,
+        'competitori_gasiti': nr_competitori
+    })
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
